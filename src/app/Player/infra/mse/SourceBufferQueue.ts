@@ -2,15 +2,17 @@ import { SharedArrayBufferError } from '@/app/Player/shared/errors';
 
 export function createSourceBufferQueue(source: SourceBuffer) {
     console.log('mse createBuffer');
-    const bufferQueue: Uint8Array[] = [];
+    const bufferQueue: ArrayBuffer[] = [];
     let destroyed = false;
-    function enqueue(chunk: Uint8Array) {
+    let setPause = false;
+    function enqueue(chunk: ArrayBuffer) {
         if (destroyed) return;
         bufferQueue.push(chunk);
         flush();
     }
     function flush() {
         if (destroyed) return;
+        if (setPause) return;
         if (source.updating) {
             return;
         }
@@ -21,7 +23,6 @@ export function createSourceBufferQueue(source: SourceBuffer) {
         if (chunk === undefined) {
             return;
         }
-        assertArrayBufferView(chunk);
         source.appendBuffer(chunk);
     }
     function clear() {
@@ -46,7 +47,35 @@ export function createSourceBufferQueue(source: SourceBuffer) {
             source.abort();
         }
     }
-    source.addEventListener('updateend', flush);
+
+    function remove(start: number, end: number) {
+        if (destroyed) return;
+        if (source.updating) {
+            return;
+        }
+        source.remove(start, end);
+    }
+
+    function pause() {
+        setPause = true;
+    }
+
+    function resume() {
+        setPause = false;
+    }
+
+    source.addEventListener('updateend', () => {
+        flush();
+    });
+
+    // 2. 브라우저가 데이터를 버리거나 에러를 낼 때 감시 (가장 중요 ⭐️)
+    source.addEventListener('error', (e) => {
+        console.error(`[SourceBuffer 🚨] 브라우저가 데이터를 거부했습니다!`, e);
+    });
+
+    source.addEventListener('abort', (e) => {
+        console.warn(`[SourceBuffer ⚠️] 데이터 주입이 강제 취소되었습니다.`, e);
+    });
 
     return {
         enqueue,
@@ -55,5 +84,8 @@ export function createSourceBufferQueue(source: SourceBuffer) {
         size,
         destroy,
         abortSourceBuffer,
+        remove,
+        pause,
+        resume,
     };
 }

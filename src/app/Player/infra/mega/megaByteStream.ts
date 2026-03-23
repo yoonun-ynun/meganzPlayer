@@ -11,7 +11,14 @@ export async function createByteStream(url: string) {
     function open(start: number, end?: number) {
         close();
         if (start > size) return null;
-        const stream = session.file.download({ start: start, end: end });
+        const stream = session.file.download({
+            start: start,
+            end: end,
+            initialChunkSize: 2 * 1024 * 1024,
+            maxChunkSize: 15 * 1024 * 1024,
+            maxConnections: 6,
+            chunkSizeIncrement: 2 * 1024 * 1024,
+        });
         iterator = stream[Symbol.asyncIterator]();
         offset = start;
         opened = true;
@@ -41,7 +48,10 @@ export async function createByteStream(url: string) {
 
     async function readHead(maxBytes: number) {
         const chunks: Uint8Array[] = [];
-        const stream = session.file.download({ start: 0, end: maxBytes - 1 });
+        const stream = session.file.download({
+            start: 0,
+            end: maxBytes - 1,
+        });
         for await (const chunk of stream) {
             chunks.push(chunk);
         }

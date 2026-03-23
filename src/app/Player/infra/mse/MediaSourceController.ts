@@ -5,10 +5,12 @@ import {
     SourceBufferQueueExistsError,
     SourceBufferQueueNotFoundError,
 } from '@/app/Player/shared/errors';
+import { mp4boxController } from '@/app/Player/infra/mse/controlMp4box';
 
 export function createMediaSourceController(video: HTMLVideoElement) {
     console.log('mse created');
-    let mediaSource: MediaSource | null = null;
+    const mp4box = mp4boxController();
+    let mediaSource: ManagedMediaSource | MediaSource | null = null;
     let sourceBufferQueue: ReturnType<typeof createSourceBufferQueue> | null = null;
     let objectURL: string | null = null;
     function checkMediaSource() {
@@ -21,6 +23,15 @@ export function createMediaSourceController(video: HTMLVideoElement) {
         if (!checkMediaSource()) {
             mediaSource = new ManagedMediaSource();
             video.disableRemotePlayback = true;
+            (mediaSource as ManagedMediaSource).onstartstreaming = () => {
+                console.log('onstartstreaming called');
+                sourceBufferQueue?.resume();
+                sourceBufferQueue?.flush();
+            };
+            (mediaSource as ManagedMediaSource).onendstreaming = () => {
+                console.log('onendstreaming called');
+                sourceBufferQueue?.pause();
+            };
         } else {
             mediaSource = new MediaSource();
         }
@@ -57,25 +68,31 @@ export function createMediaSourceController(video: HTMLVideoElement) {
             );
         });
     }
-    function createBuffer(mimeCodec: string) {
+    function createBuffer(mime: string, ids: { video: number; audio: number }) {
         if (!mediaSource) {
             throw new MediaSourceNotFoundError();
         }
         if (sourceBufferQueue) {
             throw new SourceBufferQueueExistsError();
         }
-        console.log('canPlayType', video.canPlayType(mimeCodec));
+        console.log('canPlayType', video.canPlayType(mime));
         if (checkMediaSource()) {
-            console.log('mse supported', MediaSource.isTypeSupported(mimeCodec));
+            console.log('mse supported', MediaSource.isTypeSupported(mime));
         }
-        const buffer = mediaSource.addSourceBuffer(mimeCodec);
-        sourceBufferQueue = createSourceBufferQueue(buffer);
+        console.log('mime: ', mime);
+        const muxedBuffer = mediaSource.addSourceBuffer(mime);
+        if (!checkMediaSource()) {
+            muxedBuffer.mode = 'sequence';
+        }
+        const muxedBufferQueue = createSourceBufferQueue(muxedBuffer);
+        sourceBufferQueue = muxedBufferQueue;
+        mp4box.setSource(muxedBufferQueue, ids);
     }
     function append(chunk: Uint8Array) {
         if (!sourceBufferQueue) {
             throw new SourceBufferQueueNotFoundError();
         }
-        sourceBufferQueue.enqueue(chunk);
+        mp4box.append(chunk);
     }
     function reset() {
         sourceBufferQueue?.clear();
@@ -92,11 +109,38 @@ export function createMediaSourceController(video: HTMLVideoElement) {
         video.removeAttribute('src');
         video.load();
     }
+    function remove(start: number, end: number) {
+        if (!sourceBufferQueue) {
+            throw new SourceBufferQueueNotFoundError();
+        }
+        sourceBufferQueue.remove(start, end);
+    }
+    function getMp4Mime(chunk: Uint8Array) {
+        return mp4box.getMime(chunk);
+    }
+    function pause() {
+        sourceBufferQueue?.pause();
+    }
+    function resume() {
+        sourceBufferQueue?.resume();
+        sourceBufferQueue?.flush();
+    }
+    function size() {
+        if (!sourceBufferQueue?.size()) {
+            return 0;
+        }
+        return sourceBufferQueue?.size();
+    }
     return {
         attach,
         createBuffer,
         append,
         reset,
         destroy,
+        remove,
+        getMp4Mime,
+        pause,
+        resume,
+        size,
     };
 }
