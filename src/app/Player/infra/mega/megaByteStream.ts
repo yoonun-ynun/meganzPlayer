@@ -15,7 +15,7 @@ export async function createByteStream(url: string) {
             start: start,
             end: end,
             initialChunkSize: 2 * 1024 * 1024,
-            maxChunkSize: 15 * 1024 * 1024,
+            maxChunkSize: 10 * 1024 * 1024,
             maxConnections: 6,
             chunkSizeIncrement: 2 * 1024 * 1024,
         });

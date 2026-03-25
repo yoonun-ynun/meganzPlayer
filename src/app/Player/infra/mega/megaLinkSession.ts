@@ -1,6 +1,5 @@
-import { downloadOpts, err, File } from 'megajs';
+import { File } from 'megajs';
 import { GetFileNetworkError, NoFileError } from '@/app/Player/shared/errors';
-import { Readable } from 'node:stream';
 
 export async function openFile(url: string): Promise<{
     name: string;
