@@ -28,6 +28,7 @@ export async function playbackOrchestra(url: string, video: HTMLVideoElement) {
             currentSeek = false;
             return;
         }
+        nowSeeking = true;
         console.log('seeking event');
         function seeking() {
             seek(video.currentTime);
@@ -46,6 +47,7 @@ export async function playbackOrchestra(url: string, video: HTMLVideoElement) {
     let seek_timeout: NodeJS.Timeout | null = null;
     let startPromise: Promise<void> | null = null;
     let currentSeek = false;
+    let nowSeeking = false;
     let meta = new Uint8Array();
 
     async function setting(maxForwardBuffer?: number, maxBufferQueue?: number) {
@@ -103,8 +105,6 @@ export async function playbackOrchestra(url: string, video: HTMLVideoElement) {
         while (true) {
             if (pause) {
                 console.log('pause');
-                mse.reset();
-                stream.close();
                 return;
             }
             const SourceBuffered = mse.getSourceBuffered();
@@ -149,6 +149,7 @@ export async function playbackOrchestra(url: string, video: HTMLVideoElement) {
                 }
                 continue;
             }
+            if (pause || nowSeeking) continue;
             if (video.buffered.length > 0) {
                 const playable = firstPlayableStart(
                     mse.getSourceBuffered().video,
@@ -157,7 +158,6 @@ export async function playbackOrchestra(url: string, video: HTMLVideoElement) {
                 // 0.5초는 오차 허용 범위
                 if (playable && video.currentTime < playable.start - 0.5) {
                     console.warn(`${video.currentTime}초에서 ${playable.start}초로 점프`);
-                    currentSeek = true;
                     video.currentTime = playable.start + 0.1;
                     continue;
                 }
@@ -200,14 +200,29 @@ export async function playbackOrchestra(url: string, video: HTMLVideoElement) {
         if (
             video.buffered.length > 0 &&
             video.buffered.end(video.buffered.length - 1) > time &&
-            time > video.currentTime - 10
-        )
+            time > mse.getSourceBuffered().video.start(0)
+        ) {
+            nowSeeking = false;
             return;
+        }
+        console.log('seek function');
         pause = true;
         await startPromise;
-        const startByte = await mse.getSeekByte(time);
+        mse.reset();
+        const video_length = mse.getSourceBuffered().video.length;
+        const audio_length = mse.getSourceBuffered().audio.length;
+        if (video_length || audio_length) {
+            const video_end =
+                video_length > 0 ? mse.getSourceBuffered().video.end(video_length - 1) : 1;
+            const audio_end =
+                audio_length > 0 ? mse.getSourceBuffered().audio.end(audio_length - 1) : 1;
+            mse.remove(0, video_end > audio_end ? video_end : audio_end);
+        }
+        stream.close();
+        const startByte = mse.getSeekByte(time);
         console.log('startByte:', startByte);
         pause = false;
+        nowSeeking = false;
         console.log('seeked');
         startPromise = start(startByte.offset);
     }
@@ -215,6 +230,7 @@ export async function playbackOrchestra(url: string, video: HTMLVideoElement) {
     return {
         setting,
         run,
+        seek,
     };
 }
 function dumpRanges(name: string, r: TimeRanges) {

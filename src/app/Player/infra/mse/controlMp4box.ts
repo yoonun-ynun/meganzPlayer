@@ -19,10 +19,18 @@ export function mp4boxController() {
     mp4BoxFile.onReady = () => {
         console.log('onReady');
 
-        mp4BoxFile.setSegmentOptions(trackIds.video, bufferQueues.video, {});
+        mp4BoxFile.setSegmentOptions(trackIds.video, bufferQueues.video, {
+            nbSamples: 300,
+            nbSamplesPerFragment: 6,
+            rapAlignement: true,
+        });
         mp4BoxFileForHeader.setSegmentOptions(trackIds.video, bufferQueues.video, {});
         mp4BoxFileForHeader.setSegmentOptions(trackIds.audio, bufferQueues.audio, {});
-        mp4BoxFile.setSegmentOptions(trackIds.audio, bufferQueues.audio, {});
+        mp4BoxFile.setSegmentOptions(trackIds.audio, bufferQueues.audio, {
+            nbSamples: 300,
+            nbSamplesPerFragment: 15,
+            rapAlignement: true,
+        });
         mp4BoxFile.initializeSegmentation();
         const tracksInit = mp4BoxFileForHeader.initializeSegmentation();
         tracksInit.forEach((seg) => {
@@ -186,27 +194,6 @@ function syncSegmentationStateAfterSeek(mp4boxfile: ISOFile) {
     }
 }
 
-function resetMp4boxAfterSeek(mp4boxfile: ISOFile) {
-    for (const frag of mp4boxfile.fragmentedTracks ?? []) {
-        const n = frag.trak.nextSample;
-
-        frag.state.lastFragmentSampleNumber = n;
-        frag.state.lastSegmentSampleNumber = n;
-        frag.state.accumulatedSize = 0;
-
-        // 타입 패치 안 했으면 undefined 대신 빈 stream으로 초기화
-        frag.segmentStream = new DataStream();
-    }
-
-    for (const ext of mp4boxfile.extractedTracks ?? []) {
-        ext.samples = [];
-    }
-
-    // 내부 다음 요청 힌트도 비워두는 게 안전함
-    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-    // @ts-expect-error
-    mp4boxfile.nextSeekPosition = undefined;
-}
 function concatUint8Array(arrays: Uint8Array[]) {
     const totalLength = arrays.reduce((acc, value) => acc + value.length, 0);
 

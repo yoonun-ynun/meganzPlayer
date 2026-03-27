@@ -11,7 +11,7 @@ export default function Page() {
             if (player === null) {
                 throw new Error('player not found');
             }
-            control = await playbackOrchestra('https://mega.nz/file', player);
+            control = await playbackOrchestra('https://mega.nz/file/', player);
             await control.setting();
             control.run();
         })();
