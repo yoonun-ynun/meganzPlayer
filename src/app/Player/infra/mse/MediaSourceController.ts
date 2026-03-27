@@ -17,13 +17,15 @@ export function createMediaSourceController(video: HTMLVideoElement) {
     } | null = null;
     let objectURL: string | null = null;
     function checkMediaSource() {
-        return !!window.MediaSource;
+        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+        // @ts-expect-error
+        return !!window.ManagedMediaSource;
     }
     function attach(duration: number) {
         if (mediaSource) {
             return Promise.reject(new MediaSourceExistsError());
         }
-        if (!checkMediaSource()) {
+        if (checkMediaSource()) {
             mediaSource = new ManagedMediaSource();
             video.disableRemotePlayback = true;
             (mediaSource as ManagedMediaSource).onstartstreaming = () => {
@@ -88,16 +90,12 @@ export function createMediaSourceController(video: HTMLVideoElement) {
             throw new SourceBufferQueueExistsError();
         }
         console.log('canPlayType', video.canPlayType(mime.audio));
-        if (checkMediaSource()) {
+        if (!checkMediaSource()) {
             console.log('mse supported', MediaSource.isTypeSupported(mime.audio));
         }
         console.log('mime: ', mime);
         const videoBuffer = mediaSource.addSourceBuffer(mime.video);
         const audioBuffer = mediaSource.addSourceBuffer(mime.audio);
-        if (!checkMediaSource()) {
-            videoBuffer.mode = 'sequence';
-            audioBuffer.mode = 'sequence';
-        }
         const videoBufferQueue = createSourceBufferQueue(videoBuffer);
         const audioBufferQueue = createSourceBufferQueue(audioBuffer);
         sourceBufferQueue = { video: videoBufferQueue, audio: audioBufferQueue };
