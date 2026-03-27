@@ -1,4 +1,4 @@
-import { createFile, MP4BoxBuffer } from 'mp4box';
+import { createFile, DataStream, ISOFile, MP4BoxBuffer } from 'mp4box';
 import * as MP4Boxinit from 'mp4box-initSeg';
 import { createSourceBufferQueue } from '@/app/Player/infra/mse/SourceBufferQueue';
 
@@ -12,6 +12,7 @@ export function mp4boxController() {
     const mp4BoxFileForHeader = MP4Boxinit.createFile();
     const mp4BoxFile = createFile();
     let videoInfo: null | MP4Boxinit.Movie = null;
+    let headerFile = new Uint8Array();
     mp4BoxFileForHeader.onReady = (info) => {
         videoInfo = info;
     };
@@ -19,14 +20,14 @@ export function mp4boxController() {
         console.log('onReady');
 
         mp4BoxFile.setSegmentOptions(trackIds.video, bufferQueues.video, {
-            nbSamples: 70,
-            rapAlignement: false,
+            nbSamples: 30,
+            rapAlignement: true,
         });
         mp4BoxFileForHeader.setSegmentOptions(trackIds.video, bufferQueues.video, {});
         mp4BoxFileForHeader.setSegmentOptions(trackIds.audio, bufferQueues.audio, {});
         mp4BoxFile.setSegmentOptions(trackIds.audio, bufferQueues.audio, {
-            nbSamples: 70,
-            rapAlignement: false,
+            nbSamples: 30,
+            rapAlignement: true,
         });
         mp4BoxFile.initializeSegmentation();
         const tracksInit = mp4BoxFileForHeader.initializeSegmentation();
@@ -48,6 +49,9 @@ export function mp4boxController() {
         nextSample: number,
         last: boolean,
     ) => {
+        if (id !== trackIds.video && id !== trackIds.audio) {
+            return;
+        }
         let queue: ReturnType<typeof createSourceBufferQueue> | null = null;
         if (user) {
             queue = user as ReturnType<typeof createSourceBufferQueue>;
@@ -79,9 +83,6 @@ export function mp4boxController() {
               duration: number;
           }
         | false {
-        const buffer = toMP4BoxBuffer(chunk, offset);
-        offset += chunk.byteLength;
-        mp4BoxFileForHeader.appendBuffer(buffer);
         if (videoInfo) {
             let VideoCodec: null | string = null;
             let videoId: null | number = null;
@@ -95,10 +96,8 @@ export function mp4boxController() {
                     videoId = v.id;
                 }
                 if (v.audio && !AudioCodec) {
-                    if (v.language !== 'jpn') {
-                        AudioCodec = v.codec;
-                        audioId = v.id;
-                    }
+                    AudioCodec = v.codec;
+                    audioId = v.id;
                 }
             });
             if (!(VideoCodec && AudioCodec && videoId && audioId)) {
@@ -116,6 +115,10 @@ export function mp4boxController() {
                 duration: duration,
             };
         } else {
+            const buffer = toMP4BoxBuffer(chunk, offset);
+            headerFile = concatUint8Array([headerFile, chunk]);
+            offset += chunk.byteLength;
+            mp4BoxFileForHeader.appendBuffer(buffer);
             return false;
         }
     }
@@ -124,14 +127,33 @@ export function mp4boxController() {
             throw new Error('not settings source');
         }
         const buffer = toMP4BoxBuffer(chunk, offset);
-        offset += chunk.byteLength;
-        mp4BoxFile.appendBuffer(buffer);
+        offset = mp4BoxFile.appendBuffer(buffer);
+        console.log('mp4box next_offset', offset);
+        return offset;
+    }
+
+    function seekByte(time: number) {
+        console.log('seek time', time);
+        mp4BoxFile.stop();
+        const seekInfo = mp4BoxFile.seek(time, true);
+        syncSegmentationStateAfterSeek(mp4BoxFile);
+        for (const frag of mp4BoxFile.fragmentedTracks ?? []) {
+            console.log('frag reset check after resetMp4boxAfterSeek', {
+                id: frag.id,
+                nextSample: frag.trak.nextSample,
+                lastFragmentSampleNumber: frag.state.lastFragmentSampleNumber,
+                lastSegmentSampleNumber: frag.state.lastSegmentSampleNumber,
+            });
+        }
+        mp4BoxFile.start();
+        return seekInfo;
     }
 
     return {
         getMime,
         setSource,
         append,
+        seekByte,
     };
 }
 function toMP4BoxBuffer(bytes: Uint8Array, fileStart: number): MP4BoxBuffer {
@@ -152,4 +174,54 @@ function toMP4BoxBuffer(bytes: Uint8Array, fileStart: number): MP4BoxBuffer {
 
     buffer.fileStart = fileStart;
     return buffer;
+}
+
+function syncSegmentationStateAfterSeek(mp4boxfile: ISOFile) {
+    for (const frag of mp4boxfile.fragmentedTracks || []) {
+        const n = frag.trak.nextSample;
+        frag.state.lastFragmentSampleNumber = n;
+        frag.state.lastSegmentSampleNumber = n;
+        frag.state.accumulatedSize = 0;
+        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+        // @ts-expect-error
+        frag.segmentStream = undefined;
+    }
+
+    for (const ext of mp4boxfile.extractedTracks || []) {
+        ext.samples = [];
+    }
+}
+
+function resetMp4boxAfterSeek(mp4boxfile: ISOFile) {
+    for (const frag of mp4boxfile.fragmentedTracks ?? []) {
+        const n = frag.trak.nextSample;
+
+        frag.state.lastFragmentSampleNumber = n;
+        frag.state.lastSegmentSampleNumber = n;
+        frag.state.accumulatedSize = 0;
+
+        // 타입 패치 안 했으면 undefined 대신 빈 stream으로 초기화
+        frag.segmentStream = new DataStream();
+    }
+
+    for (const ext of mp4boxfile.extractedTracks ?? []) {
+        ext.samples = [];
+    }
+
+    // 내부 다음 요청 힌트도 비워두는 게 안전함
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-expect-error
+    mp4boxfile.nextSeekPosition = undefined;
+}
+function concatUint8Array(arrays: Uint8Array[]) {
+    const totalLength = arrays.reduce((acc, value) => acc + value.length, 0);
+
+    const result = new Uint8Array(totalLength);
+
+    let offset = 0;
+    for (const arr of arrays) {
+        result.set(arr, offset);
+        offset += arr.length;
+    }
+    return result;
 }

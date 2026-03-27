@@ -14,10 +14,6 @@ export async function createByteStream(url: string) {
         const stream = session.file.download({
             start: start,
             end: end,
-            initialChunkSize: 2 * 1024 * 1024,
-            maxChunkSize: 10 * 1024 * 1024,
-            maxConnections: 6,
-            chunkSizeIncrement: 2 * 1024 * 1024,
         });
         iterator = stream[Symbol.asyncIterator]();
         offset = start;

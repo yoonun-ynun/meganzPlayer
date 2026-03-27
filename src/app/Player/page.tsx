@@ -5,14 +5,18 @@ import { playbackOrchestra } from '@/app/Player/orchestrators/playback';
 
 export default function Page() {
     useEffect(() => {
+        let control;
         (async () => {
             const player = document.getElementById('player') as HTMLVideoElement | null;
             if (player === null) {
                 throw new Error('player not found');
             }
-            const control = await playbackOrchestra('https://mega.nz/file/', player);
+            control = await playbackOrchestra(
+                'https://mega.nz/file/y9JxiQjR#yNbL5L9gQawCrepL6XgdrGpG5xV1T-XXtjtR3BdyYAc',
+                player,
+            );
             await control.setting();
-            control.start();
+            control.run();
         })();
     }, []);
     return (

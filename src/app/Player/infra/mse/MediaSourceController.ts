@@ -107,7 +107,7 @@ export function createMediaSourceController(video: HTMLVideoElement) {
         if (!sourceBufferQueue) {
             throw new SourceBufferQueueNotFoundError();
         }
-        mp4box.append(chunk);
+        return mp4box.append(chunk);
     }
     function reset() {
         sourceBufferQueue?.video.clear();
@@ -181,6 +181,10 @@ export function createMediaSourceController(video: HTMLVideoElement) {
         return true;
     }
 
+    function getSeekByte(time: number) {
+        return mp4box.seekByte(time);
+    }
+
     async function snap(tag: string) {
         const ua =
             'measureUserAgentSpecificMemory' in performance
@@ -197,8 +201,8 @@ export function createMediaSourceController(video: HTMLVideoElement) {
             return;
         }
         console.log(tag, {
-            audioQueueBytes: queueBytes(sourceBufferQueue.video.debugItem()),
-            videoQueueBytes: queueBytes(sourceBufferQueue.audio.debugItem()),
+            audioQueueBytes: queueBytes(sourceBufferQueue.audio.debugItem()),
+            videoQueueBytes: queueBytes(sourceBufferQueue.video.debugItem()),
             jsHeapBytes: js,
             uaBytes: ua?.bytes ?? null,
             sbRanges: dumpRanges(sourceBufferQueue.video.getBuffered()),
@@ -227,6 +231,7 @@ export function createMediaSourceController(video: HTMLVideoElement) {
         size,
         getSourceBuffered,
         sendSourceEnded,
+        getSeekByte,
         snap,
     };
 }
