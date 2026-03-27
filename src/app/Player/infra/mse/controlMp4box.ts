@@ -19,16 +19,10 @@ export function mp4boxController() {
     mp4BoxFile.onReady = () => {
         console.log('onReady');
 
-        mp4BoxFile.setSegmentOptions(trackIds.video, bufferQueues.video, {
-            nbSamples: 30,
-            rapAlignement: true,
-        });
+        mp4BoxFile.setSegmentOptions(trackIds.video, bufferQueues.video, {});
         mp4BoxFileForHeader.setSegmentOptions(trackIds.video, bufferQueues.video, {});
         mp4BoxFileForHeader.setSegmentOptions(trackIds.audio, bufferQueues.audio, {});
-        mp4BoxFile.setSegmentOptions(trackIds.audio, bufferQueues.audio, {
-            nbSamples: 30,
-            rapAlignement: true,
-        });
+        mp4BoxFile.setSegmentOptions(trackIds.audio, bufferQueues.audio, {});
         mp4BoxFile.initializeSegmentation();
         const tracksInit = mp4BoxFileForHeader.initializeSegmentation();
         tracksInit.forEach((seg) => {
