@@ -63,7 +63,7 @@ export async function playbackOrchestra(url: string, video: HTMLVideoElement) {
         // 1) head 읽고 mime 판별
         let mimeCodec:
             | {
-                  mime: { video: string; audio: string };
+                  mime: string;
                   videoId: number;
                   audioId: number;
                   duration: number;
@@ -112,21 +112,15 @@ export async function playbackOrchestra(url: string, video: HTMLVideoElement) {
             console.log('audioBuffered', getBufferedTime(SourceBuffered.audio, video));
             console.log('Buffered', mse.size());
 
-            if (getBufferedTime(SourceBuffered.video, video) > MAX_FORWARD_BUFFER) {
-                mse.pause('video');
+            if (
+                getForwardBufferedSeconds(video) > MAX_FORWARD_BUFFER ||
+                mse.size().video === 0 ||
+                mse.size().audio === 0
+            ) {
+                mse.pause();
             } else {
                 //mse.snap('resume');
-                mse.resume('video');
-            }
-
-            if (getBufferedTime(SourceBuffered.audio, video) > MAX_FORWARD_BUFFER) {
-                mse.pause('audio');
-            } else {
-                mse.resume('audio');
-            }
-            if (video.currentTime > 10) {
-                mse.remove(0, video.currentTime - 10);
-                //mse.snap('remove');
+                mse.resume();
             }
 
             if (
@@ -172,16 +166,6 @@ export async function playbackOrchestra(url: string, video: HTMLVideoElement) {
             dumpRanges('video sb', mse.getSourceBuffered().video);
             dumpRanges('audio sb', mse.getSourceBuffered().audio);
             console.log('currentTime', video.currentTime);
-
-            //const step = 2 * 1024 * 1024; // 1MB씩 쪼개기
-            //for (let offset = 0; offset < chunk.byteLength; offset += step) {
-            //    const subChunk = chunk.slice(offset, offset + step);
-            //    await new Promise((resolve) => setTimeout(resolve, 0));
-            //    if (pause) {
-            //        return;
-            //    }
-            //    mse.append(subChunk);
-            //}
         }
     }
     function getBufferedTime(time: TimeRanges, video: HTMLVideoElement) {
@@ -261,4 +245,18 @@ function concatUint8Array(arrays: Uint8Array[]) {
         offset += arr.length;
     }
     return result;
+}
+function getForwardBufferedSeconds(video: HTMLVideoElement): number {
+    const { buffered, currentTime } = video;
+
+    for (let i = 0; i < buffered.length; i++) {
+        const start = buffered.start(i);
+        const end = buffered.end(i);
+
+        if (currentTime >= start && currentTime <= end) {
+            return end - currentTime;
+        }
+    }
+
+    return 0;
 }

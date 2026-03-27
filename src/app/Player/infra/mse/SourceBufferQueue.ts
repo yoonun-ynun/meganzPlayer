@@ -96,7 +96,7 @@ export function createSourceBufferQueue(source: SourceBuffer) {
     source.addEventListener('updateend', () => {
         setTimeout(() => {
             flush(last_current_time);
-        }, 100);
+        }, 500);
     });
 
     source.addEventListener('error', (e) => {

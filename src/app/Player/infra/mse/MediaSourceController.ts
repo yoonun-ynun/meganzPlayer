@@ -79,25 +79,21 @@ export function createMediaSourceController(video: HTMLVideoElement) {
             );
         });
     }
-    function createBuffer(
-        mime: { video: string; audio: string },
-        ids: { video: number; audio: number },
-    ) {
+    function createBuffer(mime: string, ids: { video: number; audio: number }) {
         if (!mediaSource) {
             throw new MediaSourceNotFoundError();
         }
         if (sourceBufferQueue) {
             throw new SourceBufferQueueExistsError();
         }
-        console.log('canPlayType', video.canPlayType(mime.audio));
+        console.log('canPlayType', video.canPlayType(mime));
         if (!checkMediaSource()) {
-            console.log('mse supported', MediaSource.isTypeSupported(mime.audio));
+            console.log('mse supported', MediaSource.isTypeSupported(mime));
         }
         console.log('mime: ', mime);
-        const videoBuffer = mediaSource.addSourceBuffer(mime.video);
-        const audioBuffer = mediaSource.addSourceBuffer(mime.audio);
+        const videoBuffer = mediaSource.addSourceBuffer(mime);
         const videoBufferQueue = createSourceBufferQueue(videoBuffer);
-        const audioBufferQueue = createSourceBufferQueue(audioBuffer);
+        const audioBufferQueue = createSourceBufferQueue(videoBuffer);
         sourceBufferQueue = { video: videoBufferQueue, audio: audioBufferQueue };
         mp4box.setSource(sourceBufferQueue, ids);
     }
@@ -135,21 +131,15 @@ export function createMediaSourceController(video: HTMLVideoElement) {
     function getMp4Mime(chunk: Uint8Array) {
         return mp4box.getMime(chunk);
     }
-    function pause(select: 'video' | 'audio') {
-        if (select === 'video') {
-            sourceBufferQueue?.video.pause();
-        } else {
-            sourceBufferQueue?.audio.pause();
-        }
+    function pause() {
+        sourceBufferQueue?.video.pause();
+        sourceBufferQueue?.audio.pause();
     }
-    function resume(select: 'video' | 'audio') {
-        if (select === 'video') {
-            sourceBufferQueue?.video.resume();
-            sourceBufferQueue?.video.flush(video.currentTime);
-        } else {
-            sourceBufferQueue?.audio.resume();
-            sourceBufferQueue?.audio.flush(video.currentTime);
-        }
+    function resume() {
+        sourceBufferQueue?.video.resume();
+        sourceBufferQueue?.video.flush(video.currentTime);
+        sourceBufferQueue?.audio.resume();
+        sourceBufferQueue?.audio.flush(video.currentTime);
     }
     function size() {
         if (!sourceBufferQueue) {

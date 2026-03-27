@@ -1,5 +1,4 @@
-import { createFile, DataStream, ISOFile, MP4BoxBuffer } from 'mp4box';
-import * as MP4Boxinit from 'mp4box-initSeg';
+import { createFile, DataStream, ISOFile, Movie, MP4BoxBuffer } from 'mp4box';
 import { createSourceBufferQueue } from '@/app/Player/infra/mse/SourceBufferQueue';
 
 export function mp4boxController() {
@@ -9,40 +8,13 @@ export function mp4boxController() {
     };
     let trackIds: { video: number; audio: number };
     let offset = 0;
-    const mp4BoxFileForHeader = MP4Boxinit.createFile();
     const mp4BoxFile = createFile();
-    let videoInfo: null | MP4Boxinit.Movie = null;
+    let videoInfo: null | Movie = null;
     let headerFile = new Uint8Array();
-    mp4BoxFileForHeader.onReady = (info) => {
-        videoInfo = info;
-    };
-    mp4BoxFile.onReady = () => {
+    mp4BoxFile.onReady = (info) => {
         console.log('onReady');
 
-        mp4BoxFile.setSegmentOptions(trackIds.video, bufferQueues.video, {
-            nbSamples: 300,
-            nbSamplesPerFragment: 6,
-            rapAlignement: true,
-        });
-        mp4BoxFileForHeader.setSegmentOptions(trackIds.video, bufferQueues.video, {});
-        mp4BoxFileForHeader.setSegmentOptions(trackIds.audio, bufferQueues.audio, {});
-        mp4BoxFile.setSegmentOptions(trackIds.audio, bufferQueues.audio, {
-            nbSamples: 300,
-            nbSamplesPerFragment: 15,
-            rapAlignement: true,
-        });
-        mp4BoxFile.initializeSegmentation();
-        const tracksInit = mp4BoxFileForHeader.initializeSegmentation();
-        tracksInit.forEach((seg) => {
-            let queue: ReturnType<typeof createSourceBufferQueue> | null = null;
-            if (seg.user) {
-                queue = seg.user as ReturnType<typeof createSourceBufferQueue>;
-            } else {
-                throw new Error('Queue is undefined');
-            }
-            queue.enqueue(seg.buffer);
-        });
-        mp4BoxFile.start();
+        videoInfo = info;
     };
     mp4BoxFile.onSegment = (
         id: number,
@@ -51,16 +23,11 @@ export function mp4boxController() {
         nextSample: number,
         last: boolean,
     ) => {
-        if (id !== trackIds.video && id !== trackIds.audio) {
-            return;
+        if (id === trackIds.video) {
+            bufferQueues.video.enqueue(buffer);
+        } else if (id === trackIds.audio) {
+            bufferQueues.audio.enqueue(buffer);
         }
-        let queue: ReturnType<typeof createSourceBufferQueue> | null = null;
-        if (user) {
-            queue = user as ReturnType<typeof createSourceBufferQueue>;
-        } else {
-            throw new Error('Queue is undefined');
-        }
-        queue.enqueue(buffer);
         mp4BoxFile.releaseUsedSamples(id, nextSample);
     };
     let setSourced: boolean = false;
@@ -74,12 +41,23 @@ export function mp4boxController() {
         console.log('setting source');
         bufferQueues = source;
         trackIds = Ids;
+        mp4BoxFile.setSegmentOptions(Ids.video, source.video, {
+            nbSamples: 30,
+            nbSamplesPerFragment: 1,
+        });
+        mp4BoxFile.setSegmentOptions(Ids.audio, source.audio, {
+            nbSamples: 30,
+            nbSamplesPerFragment: 30,
+        });
+        const initSegment = mp4BoxFile.initializeSegmentation();
+        source.video.enqueue(initSegment.buffer);
+        mp4BoxFile.start();
         // setSource 안에서
         setSourced = true;
     }
     function getMime(chunk: Uint8Array):
         | {
-              mime: { video: string; audio: string };
+              mime: string;
               videoId: number;
               audioId: number;
               duration: number;
@@ -108,10 +86,7 @@ export function mp4boxController() {
             offset = 0;
             const duration = videoInfo.duration / videoInfo.timescale;
             return {
-                mime: {
-                    video: `video/mp4; codecs="${VideoCodec}"`,
-                    audio: `audio/mp4; codecs="${AudioCodec}"`,
-                },
+                mime: `video/mp4; codecs="${VideoCodec}, ${AudioCodec}"`,
                 videoId: videoId,
                 audioId: audioId,
                 duration: duration,
@@ -120,7 +95,7 @@ export function mp4boxController() {
             const buffer = toMP4BoxBuffer(chunk, offset);
             headerFile = concatUint8Array([headerFile, chunk]);
             offset += chunk.byteLength;
-            mp4BoxFileForHeader.appendBuffer(buffer);
+            mp4BoxFile.appendBuffer(buffer);
             return false;
         }
     }
