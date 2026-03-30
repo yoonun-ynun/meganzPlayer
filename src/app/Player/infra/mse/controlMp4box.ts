@@ -8,7 +8,6 @@ export function mp4boxController() {
         audio: ReturnType<typeof createSourceBufferQueue>;
     };
     let trackIds: { video: number; audio: number };
-    let offset = 0;
     const mp4BoxFileForHeader = MP4Boxinit.createFile();
     const mp4BoxFile = createFile();
     let videoInfo: null | MP4Boxinit.Movie = null;
@@ -20,16 +19,12 @@ export function mp4boxController() {
         console.log('onReady');
 
         mp4BoxFile.setSegmentOptions(trackIds.video, bufferQueues.video, {
-            nbSamples: 300,
-            nbSamplesPerFragment: 6,
-            rapAlignement: true,
+            nbSamples: 30,
         });
         mp4BoxFileForHeader.setSegmentOptions(trackIds.video, bufferQueues.video, {});
         mp4BoxFileForHeader.setSegmentOptions(trackIds.audio, bufferQueues.audio, {});
         mp4BoxFile.setSegmentOptions(trackIds.audio, bufferQueues.audio, {
-            nbSamples: 300,
-            nbSamplesPerFragment: 15,
-            rapAlignement: true,
+            nbSamples: 30,
         });
         mp4BoxFile.initializeSegmentation();
         const tracksInit = mp4BoxFileForHeader.initializeSegmentation();
@@ -77,7 +72,10 @@ export function mp4boxController() {
         // setSource 안에서
         setSourced = true;
     }
-    function getMime(chunk: Uint8Array):
+    function getMime(
+        chunk: Uint8Array,
+        offset: number,
+    ):
         | {
               mime: { video: string; audio: string };
               videoId: number;
@@ -105,7 +103,6 @@ export function mp4boxController() {
             if (!(VideoCodec && AudioCodec && videoId && audioId)) {
                 throw new Error("Can't read codec");
             }
-            offset = 0;
             const duration = videoInfo.duration / videoInfo.timescale;
             return {
                 mime: {
@@ -119,19 +116,17 @@ export function mp4boxController() {
         } else {
             const buffer = toMP4BoxBuffer(chunk, offset);
             headerFile = concatUint8Array([headerFile, chunk]);
-            offset += chunk.byteLength;
             mp4BoxFileForHeader.appendBuffer(buffer);
             return false;
         }
     }
-    function append(chunk: Uint8Array) {
+    function append(chunk: Uint8Array, offset: number) {
         if (!setSourced) {
             throw new Error('not settings source');
         }
         const buffer = toMP4BoxBuffer(chunk, offset);
-        offset = mp4BoxFile.appendBuffer(buffer);
-        console.log('mp4box next_offset', offset);
-        return offset;
+        const append_offset = mp4BoxFile.appendBuffer(buffer);
+        return append_offset;
     }
 
     function seekByte(time: number) {

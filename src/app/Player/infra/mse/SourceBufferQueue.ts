@@ -5,14 +5,12 @@ export function createSourceBufferQueue(source: SourceBuffer) {
     const bufferQueue: ArrayBuffer[] = [];
     let destroyed = false;
     let setPause = false;
-    let last_current_time = 0;
     let quota_append = false;
     function enqueue(chunk: ArrayBuffer) {
         if (destroyed) return;
         bufferQueue.push(chunk);
     }
     function flush(currentTime: number) {
-        last_current_time = currentTime;
         if (destroyed) return;
         if (setPause) return;
         if (quota_append) return;
@@ -86,18 +84,9 @@ export function createSourceBufferQueue(source: SourceBuffer) {
         return source.buffered;
     }
 
-    function debugItem() {
-        return bufferQueue;
-    }
     function getUpdating() {
         return source.updating;
     }
-
-    source.addEventListener('updateend', () => {
-        setTimeout(() => {
-            flush(last_current_time);
-        }, 100);
-    });
 
     source.addEventListener('error', (e) => {
         console.error(`SourceBuffer returned Error`, e);
@@ -119,6 +108,5 @@ export function createSourceBufferQueue(source: SourceBuffer) {
         resume,
         getBuffered,
         getUpdating,
-        debugItem,
     };
 }

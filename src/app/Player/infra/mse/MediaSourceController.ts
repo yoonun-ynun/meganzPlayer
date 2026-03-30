@@ -101,11 +101,11 @@ export function createMediaSourceController(video: HTMLVideoElement) {
         sourceBufferQueue = { video: videoBufferQueue, audio: audioBufferQueue };
         mp4box.setSource(sourceBufferQueue, ids);
     }
-    function append(chunk: Uint8Array) {
+    function append(chunk: Uint8Array, offset: number) {
         if (!sourceBufferQueue) {
             throw new SourceBufferQueueNotFoundError();
         }
-        return mp4box.append(chunk);
+        return mp4box.append(chunk, offset);
     }
     function reset() {
         sourceBufferQueue?.video.clear();
@@ -132,8 +132,8 @@ export function createMediaSourceController(video: HTMLVideoElement) {
         sourceBufferQueue.video.remove(start, end);
         sourceBufferQueue.audio.remove(start, end);
     }
-    function getMp4Mime(chunk: Uint8Array) {
-        return mp4box.getMime(chunk);
+    function getMp4Mime(chunk: Uint8Array, offset: number) {
+        return mp4box.getMime(chunk, offset);
     }
     function pause(select: 'video' | 'audio') {
         if (select === 'video') {
@@ -182,40 +182,6 @@ export function createMediaSourceController(video: HTMLVideoElement) {
     function getSeekByte(time: number) {
         return mp4box.seekByte(time);
     }
-
-    async function snap(tag: string) {
-        const ua =
-            'measureUserAgentSpecificMemory' in performance
-                ? // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-                  // @ts-expect-error
-                  await performance?.measureUserAgentSpecificMemory()
-                : null;
-
-        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-        // @ts-expect-error
-        const js = performance.memory?.usedJSHeapSize ?? null;
-
-        if (sourceBufferQueue === null) {
-            return;
-        }
-        console.log(tag, {
-            audioQueueBytes: queueBytes(sourceBufferQueue.audio.debugItem()),
-            videoQueueBytes: queueBytes(sourceBufferQueue.video.debugItem()),
-            jsHeapBytes: js,
-            uaBytes: ua?.bytes ?? null,
-            sbRanges: dumpRanges(sourceBufferQueue.video.getBuffered()),
-            currentTime: video.currentTime,
-        });
-    }
-    function dumpRanges(r: TimeRanges) {
-        const out: Array<[number, number]> = [];
-        for (let i = 0; i < r.length; i++) out.push([r.start(i), r.end(i)]);
-        return out;
-    }
-
-    function queueBytes(q: ArrayBuffer[]) {
-        return q.reduce((n, x) => n + x.byteLength, 0);
-    }
     return {
         attach,
         createBuffer,
@@ -230,6 +196,5 @@ export function createMediaSourceController(video: HTMLVideoElement) {
         getSourceBuffered,
         sendSourceEnded,
         getSeekByte,
-        snap,
     };
 }

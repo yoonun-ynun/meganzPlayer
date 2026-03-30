@@ -24,11 +24,7 @@ export async function playbackOrchestra(url: string, video: HTMLVideoElement) {
         }
     });
     video.addEventListener('seeking', () => {
-        if (currentSeek) {
-            currentSeek = false;
-            return;
-        }
-        nowSeeking = true;
+        states = 'seeking';
         console.log('seeking event');
         function seeking() {
             seek(video.currentTime);
@@ -40,17 +36,16 @@ export async function playbackOrchestra(url: string, video: HTMLVideoElement) {
     });
     let stream = await createByteStream(url);
     const mse = createMediaSourceController(video);
-    let is_setting = false;
+    let states: 'before' | 'setting' | 'playing' | 'paused' | 'seeking' | 'stopped' | 'seekingBox' =
+        'before';
     let MAX_FORWARD_BUFFER = 10;
     let MAX_BUFFER_QUEUE = 50;
-    let pause = false;
     let seek_timeout: NodeJS.Timeout | null = null;
     let startPromise: Promise<void> | null = null;
-    let currentSeek = false;
-    let nowSeeking = false;
     let meta = new Uint8Array();
 
     async function setting(maxForwardBuffer?: number, maxBufferQueue?: number) {
+        states = 'setting';
         if (maxForwardBuffer) {
             MAX_FORWARD_BUFFER = maxForwardBuffer;
         }
@@ -70,12 +65,13 @@ export async function playbackOrchestra(url: string, video: HTMLVideoElement) {
               }
             | false = false;
         while (!mimeCodec) {
+            const offset = stream.getOffset();
             const chunk = await stream.next();
             if (!chunk) {
                 break;
             }
             meta = concatUint8Array([meta, chunk]);
-            mimeCodec = mse.getMp4Mime(chunk);
+            mimeCodec = mse.getMp4Mime(chunk, offset);
         }
         if (!mimeCodec) {
             throw new Error('Not enough metadata to resolve mimeCodec');
@@ -87,43 +83,39 @@ export async function playbackOrchestra(url: string, video: HTMLVideoElement) {
         await mse.attach(mimeCodec.duration);
         mse.createBuffer(mimeCodec.mime, { video: mimeCodec.videoId, audio: mimeCodec.audioId });
         video.controls = true;
-        is_setting = true;
         stream.close();
     }
 
     function run() {
         startPromise = start(0);
+        states = 'playing';
     }
 
     async function start(startByte: number) {
-        if (!is_setting) {
+        if (states === 'before') {
             throw new Error('setting function is not called');
         }
         console.log('startByte', startByte);
         stream = await createByteStream(url);
         stream.open(startByte);
         while (true) {
-            if (pause) {
-                console.log('pause');
+            if (states === 'seeking') {
                 return;
             }
             const SourceBuffered = mse.getSourceBuffered();
-            console.log('videoBuffered:', getBufferedTime(SourceBuffered.video, video));
-            console.log('audioBuffered', getBufferedTime(SourceBuffered.audio, video));
-            console.log('Buffered', mse.size());
 
-            if (getBufferedTime(SourceBuffered.video, video) > MAX_FORWARD_BUFFER) {
-                mse.pause('video');
-            } else {
-                //mse.snap('resume');
-                mse.resume('video');
+            const videoBufferedEnough =
+                getBufferedTime(SourceBuffered.video, video) > MAX_FORWARD_BUFFER;
+            const audioBufferedEnough =
+                getBufferedTime(SourceBuffered.audio, video) > MAX_FORWARD_BUFFER;
+
+            setTrackFlow('video', videoBufferedEnough);
+            setTrackFlow('audio', audioBufferedEnough);
+
+            if (states === 'seekingBox' && videoBufferedEnough && audioBufferedEnough) {
+                states = 'playing';
             }
 
-            if (getBufferedTime(SourceBuffered.audio, video) > MAX_FORWARD_BUFFER) {
-                mse.pause('audio');
-            } else {
-                mse.resume('audio');
-            }
             if (video.currentTime > 10) {
                 mse.remove(0, video.currentTime - 10);
                 //mse.snap('remove');
@@ -138,6 +130,7 @@ export async function playbackOrchestra(url: string, video: HTMLVideoElement) {
                 continue;
             }
 
+            const offset = stream.getOffset();
             const chunk = await stream.next();
             if (!chunk) {
                 console.log('null chunk');
@@ -149,7 +142,6 @@ export async function playbackOrchestra(url: string, video: HTMLVideoElement) {
                 }
                 continue;
             }
-            if (pause || nowSeeking) continue;
             if (video.buffered.length > 0) {
                 const playable = firstPlayableStart(
                     mse.getSourceBuffered().video,
@@ -163,25 +155,15 @@ export async function playbackOrchestra(url: string, video: HTMLVideoElement) {
                 }
             }
 
-            const chunk_result = mse.append(chunk);
-            console.log('stream Offset: ', stream.getOffset());
-            if (stream.getOffset() !== chunk_result) {
+            // IMPORTANT:
+            // mp4box appendBuffer() returned next offset was unreliable in our playback flow.
+            // Using it caused parser/decode errors.
+            // We only use mp4box offset for initial seek byte calculation, then advance offsets linearly.
+            const chunk_result = mse.append(chunk, offset);
+            if (states === 'seekingBox' && stream.getOffset() !== chunk_result) {
                 console.log('restream');
                 stream.open(chunk_result);
             }
-            dumpRanges('video sb', mse.getSourceBuffered().video);
-            dumpRanges('audio sb', mse.getSourceBuffered().audio);
-            console.log('currentTime', video.currentTime);
-
-            //const step = 2 * 1024 * 1024; // 1MB씩 쪼개기
-            //for (let offset = 0; offset < chunk.byteLength; offset += step) {
-            //    const subChunk = chunk.slice(offset, offset + step);
-            //    await new Promise((resolve) => setTimeout(resolve, 0));
-            //    if (pause) {
-            //        return;
-            //    }
-            //    mse.append(subChunk);
-            //}
         }
     }
     function getBufferedTime(time: TimeRanges, video: HTMLVideoElement) {
@@ -202,11 +184,9 @@ export async function playbackOrchestra(url: string, video: HTMLVideoElement) {
             video.buffered.end(video.buffered.length - 1) > time &&
             time > mse.getSourceBuffered().video.start(0)
         ) {
-            nowSeeking = false;
             return;
         }
         console.log('seek function');
-        pause = true;
         await startPromise;
         mse.reset();
         const video_length = mse.getSourceBuffered().video.length;
@@ -221,10 +201,17 @@ export async function playbackOrchestra(url: string, video: HTMLVideoElement) {
         stream.close();
         const startByte = mse.getSeekByte(time);
         console.log('startByte:', startByte);
-        pause = false;
-        nowSeeking = false;
+        states = 'seekingBox';
         console.log('seeked');
         startPromise = start(startByte.offset);
+    }
+
+    function setTrackFlow(track: 'video' | 'audio', shouldPause: boolean) {
+        if (shouldPause) {
+            mse.pause(track);
+        } else {
+            mse.resume(track);
+        }
     }
 
     return {
@@ -233,13 +220,7 @@ export async function playbackOrchestra(url: string, video: HTMLVideoElement) {
         seek,
     };
 }
-function dumpRanges(name: string, r: TimeRanges) {
-    const out = [];
-    for (let i = 0; i < r.length; i++) {
-        out.push([r.start(i), r.end(i)]);
-    }
-    console.log(name, out);
-}
+
 function firstPlayableStart(videoSb?: TimeRanges, audioSb?: TimeRanges) {
     if (!videoSb || !audioSb) return null;
     if (videoSb.length === 0 || audioSb.length === 0) return null;
