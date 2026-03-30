@@ -91,13 +91,15 @@ export async function playbackOrchestra(url: string, video: HTMLVideoElement) {
         states = 'playing';
     }
 
-    async function start(startByte: number) {
+    async function start(startByte?: number) {
         if (states === 'before') {
             throw new Error('setting function is not called');
         }
         console.log('startByte', startByte);
         stream = await createByteStream(url);
-        stream.open(startByte);
+        if (startByte !== undefined) {
+            stream.open(startByte);
+        }
         while (true) {
             if (states === 'seeking') {
                 return;
@@ -182,6 +184,8 @@ export async function playbackOrchestra(url: string, video: HTMLVideoElement) {
             video.buffered.end(video.buffered.length - 1) > time &&
             time > mse.getSourceBuffered().video.start(0)
         ) {
+            states = 'playing';
+            startPromise = start();
             return;
         }
         console.log('seek function');
