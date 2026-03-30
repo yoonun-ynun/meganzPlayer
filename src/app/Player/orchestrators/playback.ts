@@ -104,15 +104,13 @@ export async function playbackOrchestra(url: string, video: HTMLVideoElement) {
             }
             const SourceBuffered = mse.getSourceBuffered();
 
-            const videoBufferedEnough =
-                getBufferedTime(SourceBuffered.video, video) > MAX_FORWARD_BUFFER;
-            const audioBufferedEnough =
-                getBufferedTime(SourceBuffered.audio, video) > MAX_FORWARD_BUFFER;
+            const videoBuffered = getBufferedTime(SourceBuffered.video, video);
+            const audioBuffered = getBufferedTime(SourceBuffered.audio, video);
 
-            setTrackFlow('video', videoBufferedEnough);
-            setTrackFlow('audio', audioBufferedEnough);
+            setTrackFlow('video', videoBuffered > MAX_FORWARD_BUFFER);
+            setTrackFlow('audio', audioBuffered > MAX_FORWARD_BUFFER);
 
-            if (states === 'seekingBox' && videoBufferedEnough && audioBufferedEnough) {
+            if (states === 'seekingBox' && videoBuffered > 0 && audioBuffered > 0) {
                 states = 'playing';
             }
 
