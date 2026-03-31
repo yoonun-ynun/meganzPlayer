@@ -96,8 +96,8 @@ export async function playbackOrchestra(url: string, video: HTMLVideoElement) {
             throw new Error('setting function is not called');
         }
         console.log('startByte', startByte);
-        stream = await createByteStream(url);
         if (startByte !== undefined) {
+            stream = await createByteStream(url);
             stream.open(startByte);
         }
         while (true) {
@@ -179,6 +179,12 @@ export async function playbackOrchestra(url: string, video: HTMLVideoElement) {
         return forwardBuffered;
     }
     async function seek(time: number) {
+        console.log('seek function');
+        await startPromise;
+        while (mse.size().audio > 0 || mse.size().video > 0) {
+            mse.resume('video');
+            mse.resume('audio');
+        }
         if (
             video.buffered.length > 0 &&
             video.buffered.end(video.buffered.length - 1) > time &&
@@ -188,8 +194,6 @@ export async function playbackOrchestra(url: string, video: HTMLVideoElement) {
             startPromise = start();
             return;
         }
-        console.log('seek function');
-        await startPromise;
         mse.reset();
         const video_length = mse.getSourceBuffered().video.length;
         const audio_length = mse.getSourceBuffered().audio.length;
