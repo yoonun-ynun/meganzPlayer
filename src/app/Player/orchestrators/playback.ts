@@ -42,7 +42,6 @@ export async function playbackOrchestra(url: string, video: HTMLVideoElement) {
     let MAX_BUFFER_QUEUE = 50;
     let seek_timeout: NodeJS.Timeout | null = null;
     let startPromise: Promise<void> | null = null;
-    let meta = new Uint8Array();
 
     async function setting(maxForwardBuffer?: number, maxBufferQueue?: number) {
         states = 'setting';
@@ -55,7 +54,6 @@ export async function playbackOrchestra(url: string, video: HTMLVideoElement) {
 
         stream.open(0);
 
-        // 1) head 읽고 mime 판별
         let mimeCodec:
             | {
                   mime: { video: string; audio: string };
@@ -70,7 +68,6 @@ export async function playbackOrchestra(url: string, video: HTMLVideoElement) {
             if (!chunk) {
                 break;
             }
-            meta = concatUint8Array([meta, chunk]);
             mimeCodec = mse.getMp4Mime(chunk, offset);
         }
         if (!mimeCodec) {
@@ -79,7 +76,6 @@ export async function playbackOrchestra(url: string, video: HTMLVideoElement) {
 
         console.log('mimeCodec:', mimeCodec);
 
-        // 2) MediaSource 연결
         await mse.attach(mimeCodec.duration);
         mse.createBuffer(mimeCodec.mime, { video: mimeCodec.videoId, audio: mimeCodec.audioId });
         video.controls = true;
@@ -104,31 +100,20 @@ export async function playbackOrchestra(url: string, video: HTMLVideoElement) {
             if (states === 'seeking') {
                 return;
             }
-            const SourceBuffered = mse.getSourceBuffered();
 
-            const videoBuffered = getBufferedTime(SourceBuffered.video, video);
-            const audioBuffered = getBufferedTime(SourceBuffered.audio, video);
-
-            setTrackFlow('video', videoBuffered > MAX_FORWARD_BUFFER);
-            setTrackFlow('audio', audioBuffered > MAX_FORWARD_BUFFER);
-
-            if (states === 'seekingBox' && videoBuffered > 0 && audioBuffered > 0) {
-                states = 'playing';
-            }
+            appendBuffer();
 
             if (video.currentTime > 10) {
                 mse.remove(0, video.currentTime - 10);
                 //mse.snap('remove');
             }
 
-            if (
-                (mse.size().video > MAX_BUFFER_QUEUE || mse.size().audio > 20) &&
-                mse.size().video !== 0 &&
-                mse.size().audio !== 0
-            ) {
+            if (getMaxQueue()) {
                 await new Promise((resolve) => setTimeout(resolve, 200));
                 continue;
             }
+
+            jumpGap();
 
             const offset = stream.getOffset();
             const chunk = await stream.next();
@@ -142,18 +127,6 @@ export async function playbackOrchestra(url: string, video: HTMLVideoElement) {
                 }
                 continue;
             }
-            if (video.buffered.length > 0) {
-                const playable = firstPlayableStart(
-                    mse.getSourceBuffered().video,
-                    mse.getSourceBuffered().audio,
-                );
-                // 0.5초는 오차 허용 범위
-                if (playable && video.currentTime < playable.start - 0.5) {
-                    console.warn(`${video.currentTime}초에서 ${playable.start}초로 점프`);
-                    video.currentTime = playable.start + 0.1;
-                    continue;
-                }
-            }
 
             // IMPORTANT:
             // mp4box appendBuffer() returned next offset was unreliable in our playback flow.
@@ -166,6 +139,41 @@ export async function playbackOrchestra(url: string, video: HTMLVideoElement) {
             }
         }
     }
+
+    function appendBuffer() {
+        const SourceBuffered = mse.getSourceBuffered();
+
+        const videoBuffered = getBufferedTime(SourceBuffered.video, video);
+        const audioBuffered = getBufferedTime(SourceBuffered.audio, video);
+
+        setTrackFlow('video', videoBuffered > MAX_FORWARD_BUFFER);
+        setTrackFlow('audio', audioBuffered > MAX_FORWARD_BUFFER);
+
+        if (states === 'seekingBox' && videoBuffered > 0 && audioBuffered > 0) {
+            states = 'playing';
+        }
+    }
+
+    function jumpGap() {
+        if (video.buffered.length > 0 && states !== 'seeking') {
+            const playable = firstPlayableStart(
+                mse.getSourceBuffered().video,
+                mse.getSourceBuffered().audio,
+            );
+            // 0.5초는 오차 허용 범위
+            if (playable && video.currentTime < playable.start - 0.5) {
+                console.warn(`${video.currentTime}초에서 ${playable.start}초로 점프`);
+                video.currentTime = playable.start + 0.1;
+            }
+        }
+    }
+
+    function getMaxQueue() {
+        const queue_max = mse.size().video > MAX_BUFFER_QUEUE || mse.size().audio > 20;
+        const empty_queue = mse.size().video !== 0 && mse.size().audio !== 0;
+        return queue_max && empty_queue;
+    }
+
     function getBufferedTime(time: TimeRanges, video: HTMLVideoElement) {
         const current = video.currentTime;
 
@@ -184,6 +192,7 @@ export async function playbackOrchestra(url: string, video: HTMLVideoElement) {
         while (mse.size().audio > 0 || mse.size().video > 0) {
             mse.resume('video');
             mse.resume('audio');
+            await new Promise((resolve) => setTimeout(resolve, 100));
         }
         if (
             video.buffered.length > 0 &&
@@ -236,16 +245,4 @@ function firstPlayableStart(videoSb?: TimeRanges, audioSb?: TimeRanges) {
 
     if (start >= end) return null;
     return { start, end };
-}
-function concatUint8Array(arrays: Uint8Array[]) {
-    const totalLength = arrays.reduce((acc, value) => acc + value.length, 0);
-
-    const result = new Uint8Array(totalLength);
-
-    let offset = 0;
-    for (const arr of arrays) {
-        result.set(arr, offset);
-        offset += arr.length;
-    }
-    return result;
 }
