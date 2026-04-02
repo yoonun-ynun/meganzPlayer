@@ -97,16 +97,22 @@ export function createSourceBufferQueue(source: SourceBuffer) {
     });
 
     return {
-        enqueue,
-        flush,
-        clear,
-        size,
-        destroy,
-        abortSourceBuffer,
-        remove,
-        pause,
-        resume,
-        getBuffered,
-        getUpdating,
+        queueing: {
+            enqueue,
+            clear,
+        },
+        control: {
+            flush,
+            remove,
+            destroy,
+            pause,
+            resume,
+            abortSourceBuffer,
+        },
+        getter: {
+            size,
+            getBuffered,
+            getUpdating,
+        },
     };
 }

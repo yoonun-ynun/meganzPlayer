@@ -1,4 +1,4 @@
-import { createByteStream } from '@/app/Player/infra/mega/megaByteStream';
+import { createByteStream } from '@/app/Player/infra/streamer/ByteStream';
 import { createMediaSourceController } from '@/app/Player/infra/mse/MediaSourceController';
 
 export async function playbackOrchestra(url: string, video: HTMLVideoElement) {
@@ -24,7 +24,7 @@ export async function playbackOrchestra(url: string, video: HTMLVideoElement) {
         }
     });
     video.addEventListener('seeking', () => {
-        states = 'seeking';
+        changeState('seeking');
         console.log('seeking event');
         function seeking() {
             seek(video.currentTime);
@@ -34,17 +34,39 @@ export async function playbackOrchestra(url: string, video: HTMLVideoElement) {
         }
         seek_timeout = setTimeout(seeking, 500);
     });
+    video.addEventListener('ended', () => {
+        changeState('stopped');
+    });
+    video.addEventListener('pause', () => {
+        changeState('paused');
+    });
     let stream = await createByteStream(url);
     const mse = createMediaSourceController(video);
-    let states: 'before' | 'setting' | 'playing' | 'paused' | 'seeking' | 'stopped' | 'seekingBox' =
-        'before';
+
+    type states =
+        | 'before'
+        | 'setting'
+        | 'playing'
+        | 'paused'
+        | 'seeking'
+        | 'stopped'
+        | 'seekingBox';
+    let states: states = 'before';
     let MAX_FORWARD_BUFFER = 10;
     let MAX_BUFFER_QUEUE = 50;
     let seek_timeout: NodeJS.Timeout | null = null;
     let startPromise: Promise<void> | null = null;
 
+    function getState() {
+        return states;
+    }
+
+    function changeState(state: states) {
+        states = state;
+    }
+
     async function setting(maxForwardBuffer?: number, maxBufferQueue?: number) {
-        states = 'setting';
+        changeState('setting');
         if (maxForwardBuffer) {
             MAX_FORWARD_BUFFER = maxForwardBuffer;
         }
@@ -68,7 +90,7 @@ export async function playbackOrchestra(url: string, video: HTMLVideoElement) {
             if (!chunk) {
                 break;
             }
-            mimeCodec = mse.getMp4Mime(chunk, offset);
+            mimeCodec = mse.getter.getMp4Mime(chunk, offset);
         }
         if (!mimeCodec) {
             throw new Error('Not enough metadata to resolve mimeCodec');
@@ -76,35 +98,38 @@ export async function playbackOrchestra(url: string, video: HTMLVideoElement) {
 
         console.log('mimeCodec:', mimeCodec);
 
-        await mse.attach(mimeCodec.duration);
-        mse.createBuffer(mimeCodec.mime, { video: mimeCodec.videoId, audio: mimeCodec.audioId });
+        await mse.setup.attach(mimeCodec.duration);
+        mse.setup.createBuffer(mimeCodec.mime, {
+            video: mimeCodec.videoId,
+            audio: mimeCodec.audioId,
+        });
         video.controls = true;
         stream.close();
     }
 
     function run() {
         startPromise = start(0);
-        states = 'playing';
+        changeState('playing');
     }
 
     async function start(startByte?: number) {
-        if (states === 'before') {
+        if (getState() === 'before') {
             throw new Error('setting function is not called');
         }
-        console.log('startByte', startByte);
+
         if (startByte !== undefined) {
             stream = await createByteStream(url);
             stream.open(startByte);
         }
         while (true) {
-            if (states === 'seeking') {
+            if (getState() === 'seeking') {
                 return;
             }
 
             appendBuffer();
 
             if (video.currentTime > 10) {
-                mse.remove(0, video.currentTime - 10);
+                mse.control.remove(0, video.currentTime - 10);
                 //mse.snap('remove');
             }
 
@@ -120,8 +145,8 @@ export async function playbackOrchestra(url: string, video: HTMLVideoElement) {
             if (!chunk) {
                 console.log('null chunk');
                 await new Promise((resolve) => setTimeout(resolve, 1000));
-                if (mse.size().video === 0 && mse.size().audio === 0) {
-                    const result = mse.sendSourceEnded();
+                if (mse.getter.size().video === 0 && mse.getter.size().audio === 0) {
+                    const result = mse.control.sendSourceEnded();
                     if (result) return;
                     else console.log('sourceEnded returned false');
                 }
@@ -132,8 +157,8 @@ export async function playbackOrchestra(url: string, video: HTMLVideoElement) {
             // mp4box appendBuffer() returned next offset was unreliable in our playback flow.
             // Using it caused parser/decode errors.
             // We only use mp4box offset for initial seek byte calculation, then advance offsets linearly.
-            const chunk_result = mse.append(chunk, offset);
-            if (states === 'seekingBox' && stream.getOffset() !== chunk_result) {
+            const chunk_result = mse.queueing.append(chunk, offset);
+            if (getState() === 'seekingBox' && stream.getOffset() !== chunk_result) {
                 console.log('restream');
                 stream.open(chunk_result);
             }
@@ -141,7 +166,7 @@ export async function playbackOrchestra(url: string, video: HTMLVideoElement) {
     }
 
     function appendBuffer() {
-        const SourceBuffered = mse.getSourceBuffered();
+        const SourceBuffered = mse.getter.getSourceBuffered();
 
         const videoBuffered = getBufferedTime(SourceBuffered.video, video);
         const audioBuffered = getBufferedTime(SourceBuffered.audio, video);
@@ -149,16 +174,16 @@ export async function playbackOrchestra(url: string, video: HTMLVideoElement) {
         setTrackFlow('video', videoBuffered > MAX_FORWARD_BUFFER);
         setTrackFlow('audio', audioBuffered > MAX_FORWARD_BUFFER);
 
-        if (states === 'seekingBox' && videoBuffered > 0 && audioBuffered > 0) {
-            states = 'playing';
+        if (getState() === 'seekingBox' && videoBuffered > 0 && audioBuffered > 0) {
+            changeState('playing');
         }
     }
 
     function jumpGap() {
-        if (video.buffered.length > 0 && states !== 'seeking') {
+        if (video.buffered.length > 0 && getState() !== 'seeking') {
             const playable = firstPlayableStart(
-                mse.getSourceBuffered().video,
-                mse.getSourceBuffered().audio,
+                mse.getter.getSourceBuffered().video,
+                mse.getter.getSourceBuffered().audio,
             );
             // 0.5초는 오차 허용 범위
             if (playable && video.currentTime < playable.start - 0.5) {
@@ -169,8 +194,9 @@ export async function playbackOrchestra(url: string, video: HTMLVideoElement) {
     }
 
     function getMaxQueue() {
-        const queue_max = mse.size().video > MAX_BUFFER_QUEUE || mse.size().audio > 20;
-        const empty_queue = mse.size().video !== 0 && mse.size().audio !== 0;
+        const queue_max =
+            mse.getter.size().video > MAX_BUFFER_QUEUE || mse.getter.size().audio > 20;
+        const empty_queue = mse.getter.size().video !== 0 && mse.getter.size().audio !== 0;
         return queue_max && empty_queue;
     }
 
@@ -189,43 +215,43 @@ export async function playbackOrchestra(url: string, video: HTMLVideoElement) {
     async function seek(time: number) {
         console.log('seek function');
         await startPromise;
-        while (mse.size().audio > 0 || mse.size().video > 0) {
-            mse.resume('video');
-            mse.resume('audio');
+        while (mse.getter.size().audio > 0 || mse.getter.size().video > 0) {
+            mse.control.resume('video');
+            mse.control.resume('audio');
             await new Promise((resolve) => setTimeout(resolve, 100));
         }
         if (
             video.buffered.length > 0 &&
             video.buffered.end(video.buffered.length - 1) > time &&
-            time > mse.getSourceBuffered().video.start(0)
+            time > mse.getter.getSourceBuffered().video.start(0)
         ) {
-            states = 'playing';
+            changeState('playing');
             startPromise = start();
             return;
         }
-        mse.reset();
-        const video_length = mse.getSourceBuffered().video.length;
-        const audio_length = mse.getSourceBuffered().audio.length;
+        mse.queueing.reset();
+        const video_length = mse.getter.getSourceBuffered().video.length;
+        const audio_length = mse.getter.getSourceBuffered().audio.length;
         if (video_length || audio_length) {
             const video_end =
-                video_length > 0 ? mse.getSourceBuffered().video.end(video_length - 1) : 1;
+                video_length > 0 ? mse.getter.getSourceBuffered().video.end(video_length - 1) : 1;
             const audio_end =
-                audio_length > 0 ? mse.getSourceBuffered().audio.end(audio_length - 1) : 1;
-            mse.remove(0, video_end > audio_end ? video_end : audio_end);
+                audio_length > 0 ? mse.getter.getSourceBuffered().audio.end(audio_length - 1) : 1;
+            mse.control.remove(0, video_end > audio_end ? video_end : audio_end);
         }
         stream.close();
-        const startByte = mse.getSeekByte(time);
+        const startByte = mse.getter.getSeekByte(time);
         console.log('startByte:', startByte);
-        states = 'seekingBox';
+        changeState('seekingBox');
         console.log('seeked');
         startPromise = start(startByte.offset);
     }
 
     function setTrackFlow(track: 'video' | 'audio', shouldPause: boolean) {
         if (shouldPause) {
-            mse.pause(track);
+            mse.control.pause(track);
         } else {
-            mse.resume(track);
+            mse.control.resume(track);
         }
     }
 
@@ -233,6 +259,7 @@ export async function playbackOrchestra(url: string, video: HTMLVideoElement) {
         setting,
         run,
         seek,
+        getState,
     };
 }
 

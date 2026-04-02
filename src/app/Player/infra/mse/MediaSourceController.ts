@@ -30,15 +30,15 @@ export function createMediaSourceController(video: HTMLVideoElement) {
             video.disableRemotePlayback = true;
             (mediaSource as ManagedMediaSource).onstartstreaming = () => {
                 console.log('onstartstreaming called');
-                sourceBufferQueue?.video.resume();
-                sourceBufferQueue?.audio.resume();
-                sourceBufferQueue?.video.flush(video.currentTime);
-                sourceBufferQueue?.audio.flush(video.currentTime);
+                sourceBufferQueue?.video.control.resume();
+                sourceBufferQueue?.audio.control.resume();
+                sourceBufferQueue?.video.control.flush(video.currentTime);
+                sourceBufferQueue?.audio.control.flush(video.currentTime);
             };
             (mediaSource as ManagedMediaSource).onendstreaming = () => {
                 console.log('onendstreaming called');
-                sourceBufferQueue?.video.pause();
-                sourceBufferQueue?.audio.pause();
+                sourceBufferQueue?.video.control.pause();
+                sourceBufferQueue?.audio.control.pause();
             };
         } else {
             mediaSource = new MediaSource();
@@ -63,9 +63,6 @@ export function createMediaSourceController(video: HTMLVideoElement) {
                 console.log('mse: sourceended');
             });
 
-            video.addEventListener('error', () => {
-                console.log('video error', video.error);
-            });
             mediaSource.addEventListener(
                 'sourceopen',
                 () => {
@@ -108,14 +105,14 @@ export function createMediaSourceController(video: HTMLVideoElement) {
         return mp4box.append(chunk, offset);
     }
     function reset() {
-        sourceBufferQueue?.video.clear();
-        sourceBufferQueue?.audio.clear();
-        sourceBufferQueue?.video.abortSourceBuffer();
-        sourceBufferQueue?.audio.abortSourceBuffer();
+        sourceBufferQueue?.video.queueing.clear();
+        sourceBufferQueue?.audio.queueing.clear();
+        sourceBufferQueue?.video.control.abortSourceBuffer();
+        sourceBufferQueue?.audio.control.abortSourceBuffer();
     }
     function destroy() {
-        sourceBufferQueue?.video.destroy();
-        sourceBufferQueue?.audio.destroy();
+        sourceBufferQueue?.video.control.destroy();
+        sourceBufferQueue?.audio.control.destroy();
         sourceBufferQueue = null;
         mediaSource = null;
         if (objectURL) {
@@ -129,33 +126,36 @@ export function createMediaSourceController(video: HTMLVideoElement) {
         if (!sourceBufferQueue) {
             throw new SourceBufferQueueNotFoundError();
         }
-        sourceBufferQueue.video.remove(start, end);
-        sourceBufferQueue.audio.remove(start, end);
+        sourceBufferQueue.video.control.remove(start, end);
+        sourceBufferQueue.audio.control.remove(start, end);
     }
     function getMp4Mime(chunk: Uint8Array, offset: number) {
         return mp4box.getMime(chunk, offset);
     }
     function pause(select: 'video' | 'audio') {
         if (select === 'video') {
-            sourceBufferQueue?.video.pause();
+            sourceBufferQueue?.video.control.pause();
         } else {
-            sourceBufferQueue?.audio.pause();
+            sourceBufferQueue?.audio.control.pause();
         }
     }
     function resume(select: 'video' | 'audio') {
         if (select === 'video') {
-            sourceBufferQueue?.video.resume();
-            sourceBufferQueue?.video.flush(video.currentTime);
+            sourceBufferQueue?.video.control.resume();
+            sourceBufferQueue?.video.control.flush(video.currentTime);
         } else {
-            sourceBufferQueue?.audio.resume();
-            sourceBufferQueue?.audio.flush(video.currentTime);
+            sourceBufferQueue?.audio.control.resume();
+            sourceBufferQueue?.audio.control.flush(video.currentTime);
         }
     }
     function size() {
         if (!sourceBufferQueue) {
             return { video: 0, audio: 0 };
         }
-        return { video: sourceBufferQueue?.video.size(), audio: sourceBufferQueue?.audio.size() };
+        return {
+            video: sourceBufferQueue?.video.getter.size(),
+            audio: sourceBufferQueue?.audio.getter.size(),
+        };
     }
     function getSourceBuffered() {
         if (!sourceBufferQueue) {
@@ -165,13 +165,16 @@ export function createMediaSourceController(video: HTMLVideoElement) {
             };
         }
         return {
-            video: sourceBufferQueue.video.getBuffered(),
-            audio: sourceBufferQueue.audio.getBuffered(),
+            video: sourceBufferQueue.video.getter.getBuffered(),
+            audio: sourceBufferQueue.audio.getter.getBuffered(),
         };
     }
 
     function sendSourceEnded() {
-        if (sourceBufferQueue?.video?.getUpdating() || sourceBufferQueue?.audio?.getUpdating()) {
+        if (
+            sourceBufferQueue?.video?.getter.getUpdating() ||
+            sourceBufferQueue?.audio?.getter.getUpdating()
+        ) {
             return false;
         }
         mediaSource?.endOfStream();
@@ -183,18 +186,26 @@ export function createMediaSourceController(video: HTMLVideoElement) {
         return mp4box.seekByte(time);
     }
     return {
-        attach,
-        createBuffer,
-        append,
-        reset,
-        destroy,
-        remove,
-        getMp4Mime,
-        pause,
-        resume,
-        size,
-        getSourceBuffered,
-        sendSourceEnded,
-        getSeekByte,
+        setup: {
+            attach,
+            createBuffer,
+        },
+        queueing: {
+            append,
+            reset,
+        },
+        control: {
+            destroy,
+            remove,
+            pause,
+            resume,
+            sendSourceEnded,
+        },
+        getter: {
+            getMp4Mime,
+            size,
+            getSourceBuffered,
+            getSeekByte,
+        },
     };
 }
