@@ -42,36 +42,11 @@ export async function createByteStream(url: string) {
         return opened;
     }
 
-    async function readHead(maxBytes: number) {
-        const chunks: Uint8Array[] = [];
-        const stream = session.file.download({
-            start: 0,
-            end: maxBytes - 1,
-        });
-        for await (const chunk of stream) {
-            chunks.push(chunk);
-        }
-        return concatUint8Array(chunks);
-    }
-    function concatUint8Array(arrays: Uint8Array[]) {
-        const totalLength = arrays.reduce((acc, value) => acc + value.length, 0);
-
-        const result = new Uint8Array(totalLength);
-
-        let offset = 0;
-        for (const arr of arrays) {
-            result.set(arr, offset);
-            offset += arr.length;
-        }
-        return result;
-    }
-
     return {
         open,
         next,
         close,
         getOffset,
         isOpen,
-        readHead,
     };
 }

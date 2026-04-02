@@ -35,7 +35,7 @@ export function mp4boxController() {
             } else {
                 throw new Error('Queue is undefined');
             }
-            queue.enqueue(seg.buffer);
+            queue.queueing.enqueue(seg.buffer);
         });
         mp4BoxFile.start();
     };
@@ -55,7 +55,7 @@ export function mp4boxController() {
         } else {
             throw new Error('Queue is undefined');
         }
-        queue.enqueue(buffer);
+        queue.queueing.enqueue(buffer);
         mp4BoxFile.releaseUsedSamples(id, nextSample);
     };
     let setSourced: boolean = false;
